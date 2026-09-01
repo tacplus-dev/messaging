@@ -1,0 +1,34 @@
+[package]
+name = "messaging"
+version = "1.2.0"
+edition = "2021"
+
+[dependencies]
+messaging-model = { path = "target/generated-sources/model" }
+servicemanager = { path = "target/generated-sources/model/chassis/servicemanager" }
+logger = { path = "target/generated-sources/model/chassis/logger" }
+tokio = { version = "1", features = ["full"] }
+tonic = { version = "0.14", features = ["transport"] }
+tracing = "0.1"
+async-trait = "0.1"
+
+# message_id is random, not derived from the send's timestamp: two sends by the
+# same principal in the same millisecond must not collide, and a guessable id
+# would let a caller construct another delivery's delivery_id (which IS derived,
+# from message_id + recipient) and address an ACK at it. Same version and
+# feature the chassis `saml` crate already depends on, so it is the same crate,
+# not a second copy.
+uuid = { version = "1", features = ["v4"] }
+
+# Tests only. The round-trip test drives the GENERATED ValidationWrapper rather
+# than the handler trait directly — the (spec.principal) stamp and the
+# (spec.namespace) stamp/accept/refuse are rendered in that wrapper and in
+# nothing else, so a test that called the handler would be testing the half of
+# the paired control the service wrote and not the half tacplus did. Driving the
+# wrapper means minting a bearer it can parse (`key`) and absorbing the
+# accounting it stamps (`am`). Both are the same path dependencies
+# messaging-model itself uses, so they are the same crates.
+[dev-dependencies]
+token = { path = "target/generated-sources/model/chassis/token" }
+key = { path = "target/generated-sources/model/chassis/key" }
+am = { path = "target/generated-sources/model/chassis/am" }
