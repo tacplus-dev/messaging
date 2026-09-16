@@ -537,11 +537,11 @@ async fn ticket_id_is_optional() {
     assert!(h.published()[0].ticket_id.is_empty());
 }
 
-/// The identity and tenant fields are left for EVENTBUS to stamp, and the two
-/// receipts are left for CONSUMERS to write. A value in any of them at publish
-/// time would be this service asserting something nothing verified.
+/// Identity fields are left for EVENTBUS to stamp, namespace is carried from
+/// the wrapper-verified sender, and the two receipts are left for CONSUMERS
+/// to write.
 #[tokio::test]
-async fn service_stamps_no_identity_no_tenant_and_no_receipts() {
+async fn service_stamps_no_identity_carries_sender_namespace_and_no_receipts() {
     let h = Harness::start().await;
     h.wrapper
         .send_message(Harness::signed(
@@ -553,12 +553,16 @@ async fn service_stamps_no_identity_no_tenant_and_no_receipts() {
         .expect("send");
 
     let m = &h.published()[0];
-    // (spec.identity_spiffe_subject) / (spec.identity_spiffe_actor) /
-    // (spec.store_namespace): all three are stamped by eventbus's PublishHandler
-    // from the publishing token, and the namespace one is stamp-or-REFUSE there.
+    // (spec.identity_spiffe_subject) / (spec.identity_spiffe_actor) are
+    // stamped by eventbus's PublishHandler from the publishing token.
     assert!(m.spiffe_id.is_empty(), "eventbus stamps spiffe_id");
     assert!(m.spiffe_actor.is_empty(), "eventbus stamps spiffe_actor");
-    assert!(m.namespace.is_empty(), "eventbus stamps namespace");
+    // (spec.store_namespace) is carried from the wrapper-verified sender —
+    // FIXED 2026-09-16, see the namespace field's own comment in service.rs.
+    // Leaving this empty left every message stamped with messaging's OWN
+    // namespace instead of the sender's tenant, so the recipient could never
+    // read it.
+    assert_eq!(m.namespace, TENANT, "namespace carries the sender's tenant");
     // Receipts are written after delivery, by whoever delivered or viewed.
     assert!(m.agent_received.is_none());
     assert!(m.human_viewed.is_none());

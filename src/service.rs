@@ -225,15 +225,12 @@ impl MessagingHandler for MessagingService {
                 text: req.text.clone(),
                 ticket_id: req.ticket_id.clone(),
                 sent_at_ms,
-                // spiffe_id, spiffe_actor and namespace are STAMPED BY EVENTBUS
-                // from the publishing token — `(spec.identity_spiffe_subject)`,
-                // `(spec.identity_spiffe_actor)` and `(spec.store_namespace)`
-                // respectively — and are deliberately left empty here. Writing a
-                // value into any of them would be this service asserting an
-                // identity or a tenant that nothing verified, which is exactly
-                // what those annotations exist to prevent. The namespace one is
-                // stamp-or-REFUSE at the broker: a publish whose token carries no
-                // namespace claim is rejected outright rather than stored blank.
+                // spiffe_id and spiffe_actor are STAMPED BY EVENTBUS from the
+                // publishing token — `(spec.identity_spiffe_subject)` and
+                // `(spec.identity_spiffe_actor)` — and are deliberately left
+                // empty here. Writing a value into either would be this
+                // service asserting an identity that nothing verified, which
+                // is exactly what those annotations exist to prevent.
                 spiffe_id: String::new(),
                 spiffe_actor: String::new(),
                 request_id: request_id.clone(),
@@ -242,7 +239,20 @@ impl MessagingHandler for MessagingService {
                 // message that has just been sent.
                 agent_received: None,
                 human_viewed: None,
-                namespace: String::new(),
+                // namespace is set to the WRAPPER-VERIFIED sender's namespace,
+                // not left empty — FIXED 2026-09-16. The comment this replaced
+                // described `(spec.store_namespace)` as pure stamp-or-refuse at
+                // the broker, which was eventbus's behavior before
+                // decisions/namespace-fix-corrected-2026-09-02.md: it is now a
+                // three-way (already set on the row → accepted; empty →
+                // stamped from the PUBLISHER's own token, not the sender's).
+                // Leaving this empty meant every message landed under
+                // messaging's own service namespace instead of the sender's
+                // tenant, so the intended recipient's tenant-scoped read could
+                // never find it — messages sent, never delivered, no error.
+                // Same fix mailbox already has (mailbox/src/service.rs:396
+                // copies msg.namespace from the delivery on purpose).
+                namespace: namespace.clone(),
                 ..Default::default()
             };
 
