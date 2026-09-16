@@ -167,6 +167,16 @@ impl MessagingHandler for MessagingService {
                     "recipients must not contain an empty entry",
                 ));
             }
+            // Message.recipient is (spec.assert_max_size) = 256 in the proto.
+            // Checked here, not left to eventbus: a publish eventbus rejects
+            // for this is retried forever by the generated publish loop, which
+            // wedges that queue slot permanently rather than dropping it —
+            // every later send from every tenant then queues behind it.
+            if r.len() > 256 {
+                return Err(tonic::Status::invalid_argument(format!(
+                    "recipient {r:?} exceeds the 256-byte limit"
+                )));
+            }
             if !recipients.contains(&r) {
                 recipients.push(r);
             }

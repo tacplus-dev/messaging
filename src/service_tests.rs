@@ -586,6 +586,26 @@ async fn empty_recipient_entry_is_refused() {
     assert!(h.published().is_empty());
 }
 
+/// A recipient over Message.recipient's (spec.assert_max_size) = 256 is
+/// refused here rather than passed through to eventbus, which would retry
+/// the rejected publish forever and wedge that queue slot permanently.
+#[tokio::test]
+async fn oversized_recipient_is_refused() {
+    let h = Harness::start().await;
+    let too_long = "x".repeat(257);
+    let err = h
+        .wrapper
+        .send_message(Harness::signed(
+            send_to(&[&too_long]),
+            "user:dennis",
+            TENANT,
+        ))
+        .await
+        .expect_err("an oversized recipient must be refused");
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert!(h.published().is_empty());
+}
+
 /// Re-sending the SAME submission regenerates the SAME delivery ids, which is
 /// what makes the fan-out replay-safe at the store: a retry rewrites the same
 /// rows rather than creating a second set.
