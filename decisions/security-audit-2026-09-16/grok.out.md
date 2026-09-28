@@ -34,9 +34,9 @@ Security review is running. I’ll locate the proto and read the service sources
   └ 34 lines read
 
 ✗ List sibling services and proto dirs (shell)
-  │ ls /Users/jody/workspace/gitlab/secondstarcavalier/schematic/platform/services/ 2>/dev/null; ls
-  │ /Users/jody/workspace/gitlab/secondstarcavalier/schematic/platform/proto/services/ 2>/dev/null;
-  │ ls /Users/jody/workspace/gitlab/secondstarcavalier/schematic/platform/ 2>/dev/null
+  │ ls /Users/jody/workspace/gitlab/seabeam/schematic/platform/services/ 2>/dev/null; ls
+  │ /Users/jody/workspace/gitlab/seabeam/schematic/platform/proto/services/ 2>/dev/null;
+  │ ls /Users/jody/workspace/gitlab/seabeam/schematic/platform/ 2>/dev/null
   └ Permission denied and could not request permission from user
 
 ● Read service_tests.rs
@@ -63,11 +63,11 @@ Security review is running. I’ll locate the proto and read the service sources
   └ L251:550 (300 lines read)
 
 ✗ Search (glob)
-  │ "**/messaging.proto" in ~/workspace/gitlab/secondstarcavalier/schematic
+  │ "**/messaging.proto" in ~/workspace/gitlab/seabeam/schematic
   └ Permission denied and could not request permission from user
 
 ✗ Search (glob)
-  │ "**/mailbox/src/service.rs" in ~/workspace/gitlab/secondstarcavalier/schematic
+  │ "**/mailbox/src/service.rs" in ~/workspace/gitlab/seabeam/schematic
   └ Permission denied and could not request permission from user
 
 ● Read service_tests.rs
@@ -75,11 +75,11 @@ Security review is running. I’ll locate the proto and read the service sources
   └ L550:800 (59 lines read)
 
 ✗ Read messaging.proto
-  │ ~/workspace/gitlab/secondstarcavalier/schematic/platform/proto/services/messaging.proto
+  │ ~/workspace/gitlab/seabeam/schematic/platform/proto/services/messaging.proto
   └ Permission denied and could not request permission from user
 
 ✗ Read service.rs
-  │ ~/workspace/gitlab/secondstarcavalier/schematic/platform/services/mailbox/src/service.rs
+  │ ~/workspace/gitlab/seabeam/schematic/platform/services/mailbox/src/service.rs
   └ Permission denied and could not request permission from user
 
 / Search (grep)
