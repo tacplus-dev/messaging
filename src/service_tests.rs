@@ -100,6 +100,17 @@ impl Authorizer for TokenAuthorizer {
     ) -> Result<HashMap<String, String>, tonic::Status> {
         Self::identity(authorization)
     }
+
+    // Signature-and-expiry only, per the trait's own contract. Same body as the
+    // other two here for the same reason they share one: this fixture's whole
+    // job is to turn a fixture bearer into a caller identity, and the three
+    // differ only in the checks a REAL authorizer layers on top of that.
+    async fn authenticate(
+        &self,
+        authorization: Option<&str>,
+    ) -> Result<HashMap<String, String>, tonic::Status> {
+        Self::identity(authorization)
+    }
 }
 
 /// An accounting `Sink` that keeps the events instead of publishing them.
