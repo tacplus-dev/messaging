@@ -1,0 +1,547 @@
+// Messaging — the platform's message primitive.
+//
+// SCOPE. `Message` is a primitive with no opinions:
+//
+//   "Messaging is just that messaging. It does not have an opinion outside of
+//    a message. A message has a sender, recipient (can be multiple), subject,
+//    and some text." — Jody, decisions/messaging-vs-ticketing-2026-08-31.md
+//
+// It never grows ticket-specific fields. A message that pertains to a ticket
+// carries `ticket_id`, a DEDICATED optional field, never a value parsed out of
+// `text` — the standing rule is "if anything has to parse it to act on it, it
+// should have been a field".
+//
+// WHY THERE IS A SERVICE HERE AT ALL, given the primitive has no opinions.
+// decisions/eventbus-messaging-backend-2026-08-31.md's SUPERSEDED section
+// settles it: EventBus is s2s-only, the same posture stratum already holds, so
+// no client touches raw backing infrastructure. A user calls this service's own
+// RPC_PRINCIPAL_USER `SendMessage`; this service does the EventBus publishes,
+// s2s. The mediation is about ACCESS, not about business logic.
+//
+// AND THE SERVICE DOES REAL WORK, for one specific reason. There are two
+// independent fan-out axes and only one of them is free:
+//
+//   - Fan-out across service TYPES (scotty's consumer group vs. the future
+//     mailbox service's) is native to EventBus's consumer-group model. Free.
+//     Nothing in this file arranges it; see the `Message` record below.
+//   - Fan-out across named RECIPIENTS within one message is NOT free. One
+//     publish is one record consumed once per consumer group; EventBus cannot
+//     turn a `recipients: [Alice, Bob, Carol]` into three independently
+//     consumable, independently ACKable deliveries. So this service publishes N
+//     separately-keyed records, one per recipient. That split is why `Message`
+//     below carries BOTH a singular `recipient` (the one this delivery is for,
+//     and the record key's basis) and the full `recipients` list (the To: line,
+//     identical across all N).
+//
+// Modelled on scotty/proto/services/scotty.proto and
+// schematic/testapp/proto/services/tasks.proto. Where an annotation here looks
+// like one there, it is because it IS that one — see
+// platform/services/vanilla/FAMILY.md for what each generates.
+
+syntax = "proto3";
+
+package messaging;
+
+import "sys/spec.proto";
+
+// The service ID is assigned in registry.yaml, not here. IDs are GLOBAL across
+// every proto repo merged into a build and the merge hard-errors on collision.
+option (spec.service) = {name: "messaging"};
+
+// ============================================================================
+// Config
+// ============================================================================
+
+// Config is delivered by kernel at startup and on every change.
+message Config {
+  option (spec.grpc_config) = {service_name: "messaging"};
+
+  // The topic tacplus SYNTHESIZES from Message's spec.record
+  // (messaging.MessageBus.stream). It carries no method_s2s: the producer
+  // surface is declared on the record itself and the generator folds it in, so
+  // restating it here could only drift.
+  option (spec.event_publish) = {
+    topic_ref: "messaging.MessageBus.stream"
+  };
+
+  // max_recipients bounds the recipient fan-out of ONE submission, and it is a
+  // resource limit on the service, not a business rule: N recipients means N
+  // publishes, so an unbounded list is an unbounded amount of work bought with
+  // one RPC. Held in config rather than as a constant for the same reason
+  // tasks.Config.max_open_tasks is — changing it in kernel must change
+  // behaviour with no redeploy.
+  //
+  // It must not exceed SendMessageRequest.recipients' assert_max_size (256):
+  // the two describe the same cap and the generated request validation is the
+  // hard edge, so a config above it could never take effect.
+  int32 max_recipients = 1 [(spec.default_int) = 64, (spec.assert_ge) = 1, (spec.assert_le) = 256];
+}
+
+// ============================================================================
+// Receipts
+// ============================================================================
+//
+// TWO RECEIPTS, SEPARATELY TYPED — deliberately, not for symmetry.
+// decisions/messaging-vs-ticketing-2026-08-31.md:
+//
+//   - "Agent-received receipt = the same signal as the delivery ACK, not a
+//     separate layer. One event, not two."
+//   - "Human-viewed receipt: fires when the actual person looks at it, distinct
+//     from and separately typed from agent-received."
+//
+// Two int64 timestamps on `Message` would have been the cheap encoding and it
+// would have been wrong: it makes the two look like the same kind of fact
+// measured twice, when one is a machine ACK and the other is a claim about a
+// person. Distinct types force a consumer to decide which it is asserting.
+
+// AgentReceivedReceipt is the delivery ACK — the agent (scotty, the mailbox
+// service) took the record off the topic and processed it. Written by the
+// consumer, never by the sender or by this service.
+//
+// It is the ACK, not a copy of it: there is one event here, not a delivery ACK
+// plus a receipt derived from it.
+message AgentReceivedReceipt {
+  // received_at_ms is when the consuming agent completed processing — the same
+  // instant it commits its consumer-group offset, since committing before
+  // processing is exactly the discipline the queue semantics forbid.
+  int64 received_at_ms = 1 [(spec.assert_ge) = 0];
+
+  // received_by is the SPIFFE identity of the consuming agent instance.
+  string received_by = 2 [(spec.assert_max_size) = 1024];
+}
+
+// HumanViewedReceipt fires when the actual person looked at the message. A
+// distinct signal from AgentReceivedReceipt above: an agent can have ACKed a
+// message hours before a human sees it, and business-hours-deferred
+// presentation makes that gap the normal case rather than the exception.
+//
+// Presentation is a passive pull label — the reader is told "viewed", never
+// pushed a notification. That is the design already built for tickets
+// (decisions/ticket-read-receipts-2026-08-30.md), relocated to where it
+// belongs.
+message HumanViewedReceipt {
+  // viewed_at_ms is when the person actually looked.
+  int64 viewed_at_ms = 1 [(spec.assert_ge) = 0];
+
+  // viewed_by is the principal subject of the person who looked. It is normally
+  // equal to Message.recipient — a delivery is viewed by its addressee — but it
+  // is stored rather than assumed, because a delegate viewing on someone's
+  // behalf is a real case and an inferred value could not tell the two apart.
+  string viewed_by = 2 [(spec.assert_max_size) = 256];
+}
+
+// ============================================================================
+// Message — the record
+// ============================================================================
+
+// Message is ONE DELIVERY: one message, to one recipient.
+//
+// It is NOT one row per submission. A submission naming three recipients
+// becomes three `Message` rows sharing a `message_id`, differing in
+// `delivery_id` and `recipient`, each independently consumable and
+// independently ACKable. See the fan-out note at the top of this file for why
+// EventBus cannot do that split itself.
+//
+// spec.record implies spec.event, so tacplus synthesizes the topic wrapper
+// MessageBus with topic ref messaging.MessageBus.stream. Do NOT hand-write that
+// wrapper.
+message Message {
+  option (spec.record) = {
+    // delivery_id, not message_id: the key is the record's unique identity, and
+    // the N deliveries of one submission are N distinct records. Keying on
+    // message_id would make them collide — the store is CRUD-mutable (receipts
+    // below are written after the fact), so a colliding key is a silent
+    // overwrite of every recipient's delivery but the last.
+    key: "delivery_id"
+    owner: "spiffe_id"
+
+    // PRODUCER surface: only this service publishes onto this topic. That is
+    // the whole content of the SUPERSEDED ruling — the user calls SendMessage
+    // below and messaging publishes; no client and no other service holds the
+    // producer side.
+    s2s: {auth_services: ["messaging"]}
+
+    // CONSUMER surface, and the field this whole task's topic-shape requirement
+    // lands on. Naming it is not optional: without s2s_subscribe the
+    // synthesized MessageBus wrapper's SubscribeTo RPC falls back to the state
+    // service's service-level list, which for a synthesized wrapper resolves to
+    // the OWNING PACKAGE ("messaging"), and every real subscriber is denied on
+    // the topic it exists to read.
+    //
+    // stratum is here because it is the record store and every record topic's
+    // ingest path runs through it.
+    //
+    // scottyagent is here because it is Phase 1 item 7's consumer and it is a
+    // SEPARATE CONSUMER GROUP: each named service subscribes as its own group,
+    // each group gets its own full copy of every record, and within a group
+    // competing-consumer semantics already guarantee exactly one instance
+    // handles each record. That is the "fan-out across service types" axis, and
+    // it is free — it needs no duplication step here.
+    //
+    // mailbox is Phase 1 item 8's consumer, and it arrived exactly as this
+    // comment predicted: as a THIRD consumer group, with nothing about this
+    // message's shape changed — no field added, no key changed, no publish
+    // count changed, and neither stratum's nor scottyagent's group disturbed,
+    // because consumer groups are broadcast to independently. Its name in this
+    // list was the one edit its arrival needed, and adding it was an
+    // authorization decision (who may tail private messages) taken here rather
+    // than granted by the new service to itself.
+    //
+    // NAME CORRECTION (Phase 1 item 7, 2026-09-01): this list said "scotty"
+    // when it was written, naming item 7's consumer before item 7 existed. The
+    // agent service that consumes this topic is `scottyagent`; `scotty` is the
+    // TICKETING service (the app service, registry id 70) and does not tail
+    // messages. Service names are global across every merged proto repo, so the
+    // agent could not take the name `scotty` and the authorization list has to
+    // name the service that actually subscribes.
+    s2s_subscribe: {auth_services: ["stratum", "scottyagent", "mailbox"]}
+
+    // LIFECYCLE — ONE CLOCK, per
+    // looper/schematic/decisions/stratum-record-lifecycle-2026-09-20.md,
+    // replacing the placeholder that stood here from 2026-09-20 until the fleet
+    // annotation pass, and before it the 90-day `retention` clock tacplus
+    // cd8829fb retired outright. deleted_max_age_seconds is NOT a translation of
+    // that window and this block does not pretend otherwise.
+    //
+    // idle_seconds 86400 — one day; equal to the platform default
+    // (parser.DefaultResidencyIdleSeconds) and written down rather than left at 0
+    // so a chosen number and an omitted one do not look alike. Arrived at from
+    // who actually READS these rows, which is narrower than the subscriber list
+    // above suggests:
+    //
+    //   - The topic consumers do NOT. stratum, scottyagent and mailbox in
+    //     s2s_subscribe tail the STREAM; a subscriber never touches the stored
+    //     row, so no volume of delivery traffic restarts this clock. Nor do
+    //     mailbox's own ListHeldMail reads: those read mailbox.MailboxEntry
+    //     through the record plane (they read kernel state until 2026-09-27; the
+    //     store they read is this one's sibling either way, never this record).
+    //   - The reader this clock exists for is a PERSON, through the query plane's
+    //     c2s half, held to their own `recipient` by the generated egress filter.
+    //     Mail is opened within minutes or hours of arrival, re-read inside the
+    //     same exchange, and then not touched again.
+    //
+    // The deciding fact is the JOINT read. services/mailbox.proto's MailboxEntry
+    // is keyed by the same delivery_id as this row, carries only the summary line
+    // and no body, and took 86400 for its own idle clock. "Fetch the body of the
+    // mail I was just listed" is therefore one read of THIS record with an id the
+    // client already holds — and an entry that is warm while its message is cold
+    // would put a disk load in the middle of exactly that gesture. Matching that
+    // number is the point, not a coincidence; the two types are one read path.
+    //
+    // The receipts do not argue for anything longer. agent_received and
+    // human_viewed are written onto an existing row by republish of the whole
+    // Message, which restamps the row's last-write clock and makes it resident
+    // again without ever having had to load it.
+    //
+    // deleted_max_age_seconds 2592000 — thirty days; the platform default
+    // (parser.DefaultResidencyDeletedMaxAgeSeconds), stated explicitly and INERT
+    // today: the purge clock measures only rows whose (spec.deleted_flag) bool is
+    // set, this record declares none, and the annotation pass does not add one —
+    // that is a wire-shape change and a separate decision. A user-visible "delete
+    // this message" is the obvious future claimant on the marker, and the day it
+    // lands this number acquires teeth without the type also having to acquire a
+    // number.
+    residency: {idle_seconds: 86400 deleted_max_age_seconds: 2592000}
+  };
+
+  // delivery_id is the record key: "<message_id>/<recipient>". One per
+  // (message, recipient) pair, which is what makes the N publishes of one
+  // submission N separately-keyed records rather than N copies of one.
+  //
+  // Derived rather than random ON PURPOSE: the value a caller would need to
+  // reconstruct to ACK a delivery is exactly (which message, for whom), so
+  // deriving it means an agent that knows both never has to have been told the
+  // id. It is also what makes the fan-out replay-safe — a retried submission
+  // regenerates the same delivery ids rather than a second set of rows.
+  string delivery_id = 1 [
+    (spec.assert_required) = true,
+    (spec.assert_min_size) = 1,
+    (spec.assert_max_size) = 512
+  ];
+
+  // message_id groups the N deliveries of ONE submission. EQ-filterable,
+  // because "every delivery of the message I sent" is the question a sender
+  // asks, and it is the only way back from a delivery to its siblings.
+  string message_id = 2 [
+    (spec.assert_required) = true,
+    (spec.assert_max_size) = 128,
+    (spec.query_field) = {op: QUERY_OP_EQ}
+  ];
+
+  // sender is who sent it — the authenticated principal subject bound by the
+  // (spec.principal) field on SendMessageRequest below, never a caller-written
+  // string.
+  string sender = 3 [
+    (spec.assert_required) = true,
+    (spec.assert_max_size) = 256,
+    (spec.query_field) = {op: QUERY_OP_EQ}
+  ];
+
+  // recipient is THE recipient this delivery is for — one of `recipients`
+  // below, and the half of delivery_id that varies across the fan-out.
+  //
+  // It is also the ROW'S OWNING PRINCIPAL for the record query plane's c2s
+  // half. spiffe_id below is the record's declared owner but is the PUBLISHER —
+  // eventbus stamps messaging's own service identity onto it — so filtering a
+  // user's reads on that field would show every user nothing. `sender` is the
+  // other candidate and is the wrong one: a mailbox read is "messages addressed
+  // to me", so the field the generated egress filter holds a caller's reads to
+  // must be the addressee.
+  //
+  // The consequence is stated rather than hidden: a SENDER cannot read their own
+  // sent messages through this record's c2s plane, because only one field may
+  // carry (spec.store_principal) and this is it. Sent-items is a mailbox
+  // concern and the mailbox service is Phase 1 item 8, undesigned; inventing a
+  // second read path for it here would be inventing that service's shape.
+  //
+  // The EQ criterion is what carries the row filter into the plane's SIZE-ONLY
+  // RPCs: Get<T>Count returns a number over the handle's predicate and no rows,
+  // so no egress filter can narrow it. The generated c2s wrapper pins this
+  // criterion to the caller at Create<T>Query and every later call on the
+  // handle inherits it.
+  string recipient = 4 [
+    (spec.store_principal) = true,
+    (spec.assert_required) = true,
+    (spec.assert_max_size) = 256,
+    (spec.query_field) = {op: QUERY_OP_EQ}
+  ];
+
+  // recipients is the full To: line — every recipient of the submission, the
+  // SAME list on all N deliveries. `recipient` above says which one this row is
+  // for; this says who else got it.
+  //
+  // Carrying it is not redundancy. Without it a recipient cannot see who else
+  // was addressed, which is information the sender chose to disclose by
+  // addressing them together — the same reason a To: header exists and a Bcc:
+  // one does not. (This file models no Bcc; nothing has asked for one.)
+  //
+  // Bounded at 256 to match Config.max_recipients' ceiling above.
+  repeated string recipients = 5 [(spec.assert_max_size) = 256];
+
+  // subject is the message's subject line.
+  string subject = 6 [(spec.assert_max_size) = 512];
+
+  // text is the message body. Free text, and nothing parses it — see ticket_id.
+  string text = 7 [(spec.assert_max_size) = 16384];
+
+  // ticket_id OPTIONALLY references the ticket this message pertains to.
+  //
+  // A dedicated field, never a value embedded in `text`. Routing and status
+  // display have to associate a message with its ticket to act, and the
+  // standing rule is that anything that must be parsed to be acted on should
+  // have been a field. Optional because most messages pertain to no ticket, and
+  // EQ-filterable because "every message about this ticket" is the question the
+  // field exists to answer.
+  //
+  // This is the ONLY ticket-shaped thing on Message, and it is an opaque id.
+  // Ticket's own churn — advice sealing, decision chains, amend/reconsider —
+  // stays entirely inside Ticket. That is what keeps this type stable.
+  string ticket_id = 8 [
+    (spec.assert_max_size) = 128,
+    (spec.query_field) = {op: QUERY_OP_EQ}
+  ];
+
+  // sent_at_ms is the business clock — when the sender submitted — and the
+  // RANGE criterion, because "my messages from last week" is the question a
+  // mailbox asks.
+  //
+  // Identical across all N deliveries of one submission: they were one act.
+  int64 sent_at_ms = 9 [(spec.query_field) = {op: QUERY_OP_RANGE}];
+
+  // spiffe_id is the record owner. The name is LOAD-BEARING: eventbus's topic
+  // discovery matches the literal field name "spiffe_id" of string type when it
+  // decides which topics get publisher-identity stamping, so renaming this
+  // field silently turns the stamping off.
+  //
+  // It holds MESSAGING'S OWN service identity, not the sender's, because the
+  // publish is s2s from this service — that is the direct consequence of the
+  // SUPERSEDED ruling. `sender` above is where the human is.
+  string spiffe_id = 10 [
+    (spec.identity_spiffe_subject) = true,
+    (spec.assert_max_size) = 1024,
+    (spec.query_field) = {op: QUERY_OP_EQ}
+  ];
+
+  // spiffe_actor is the ORIGIN signal: the delegate that made the call, stamped
+  // by EventBus from the publishing token's `act` claim at publish time.
+  //
+  //   "a message is marked as originating from the user directly or from the
+  //    user's Scotty acting on their behalf... A message sent by
+  //    Scotty-for-Dennis carries `act` populated; one Dennis sends directly
+  //    doesn't." — decisions/messaging-vs-ticketing-2026-08-31.md
+  //
+  // The service does not set it and must not: like spiffe_id above, a value
+  // written here would be a claim about identity that nothing verified.
+  // Provenance only — sys/spec.proto forbids wiring it into a principal.
+  //
+  // GAP, STATED NOT PAPERED OVER. That quote describes the pre-supersession
+  // model, where the user published to EventBus DIRECTLY and EventBus saw the
+  // user's own delegated token. Under the corrected model the publish is s2s
+  // from messaging, so the token EventBus stamps from is messaging's own
+  // service token and carries no `act` claim at all — this field will be empty
+  // in the ordinary case, including for a genuine Scotty-for-Dennis send. The
+  // annotation is declared anyway, and correctly: the seam is the right one and
+  // the field is where the value belongs the moment the delegated-publish path
+  // exists. Closing it needs an s2s publish that carries the caller's exchanged
+  // token, which the generated publisher does not offer today. Written up in
+  // workers/big8-p1-messaging-questions.md rather than hand-rolled around.
+  string spiffe_actor = 11 [
+    (spec.identity_spiffe_actor) = true,
+    (spec.assert_max_size) = 1024
+  ];
+
+  // request_id is the JOIN KEY to the accounting plane — the same value
+  // accountingrecord.AccountingRecord carries under the same name with the same
+  // EQ query_field, so "which accounting rows belong to the request that sent
+  // this message" is one predicate asked of two record types.
+  //
+  // Empty is legitimate: a call with no authenticated Caller has none to read.
+  string request_id = 12 [
+    (spec.assert_max_size) = 128,
+    (spec.query_field) = {op: QUERY_OP_EQ}
+  ];
+
+  // agent_received is the delivery ACK, written by the consuming agent after it
+  // processes this delivery. Unset at publish — this service never writes it.
+  AgentReceivedReceipt agent_received = 13;
+
+  // human_viewed is the separately-typed human signal. Unset at publish, and
+  // unset for as long as the person has not looked, which is the normal state
+  // of a delivered message.
+  HumanViewedReceipt human_viewed = 14;
+
+  // namespace is the row's owning TENANT, by EXACT string equality against the
+  // caller's namespace claim (never the level-or-below containment the
+  // administrative namespace rule uses). It is the tenant half of the identity
+  // `recipient` carries the subject half of: that field's (spec.store_principal)
+  // answers "are these MY rows", this one answers "is this MY tenant".
+  //
+  // MANDATORY, not opt-in: tacplus (ValidateRecordNamespaceAnnotations) fails
+  // generation for any (spec.record) declaring no such field, on the reasoning
+  // that the record nobody remembered to annotate is exactly the one that leaks.
+  //
+  // TWO DIFFERENT ENFORCEMENTS, and they are not the same failure:
+  //   - WRITE (this record's publish path). eventbus's PublishHandler stamps
+  //     this field from the publishing token's namespace claim and REFUSES the
+  //     publish with PERMISSION_DENIED when the token carries none. Stamp-or-
+  //     refuse, deliberately not stamp-if-empty: a row published with an empty
+  //     namespace is a row no legitimate caller can ever read.
+  //   - READ (stratum's record query plane, c2s half). The generated egress
+  //     filter holds every row to the reader's own claim, and a row that fails
+  //     the comparison HALTS THE JVM rather than failing the one call — the
+  //     filter is the backstop behind the store's own query, so it firing means
+  //     that query is broken.
+  //
+  // Bounded like every other string here. Not a (spec.query_field): the field
+  // exists to be the egress boundary, and making it a caller-supplied predicate
+  // is not what a boundary is.
+  string namespace = 15 [
+    (spec.store_namespace) = true,
+    (spec.assert_max_size) = 256
+  ];
+
+  // store_epoch_ms is this row's LAST-WRITE clock, Unix milliseconds, stamped by
+  // stratum's generated subscription dispatch on every write and never by this
+  // service: a value set on a publish is overwritten, not trusted. It is what
+  // puts this type on stratum's generated redo log. Each node's log is partial,
+  // so restore is a union across nodes, and this epoch is the clock that orders
+  // it.
+  //
+  // RANGE per (spec.store_epoch)'s own contract — it is the predicate a
+  // two-leg memory/disk query partitions on.
+  int64 store_epoch_ms = 16 [
+    (spec.store_epoch) = true,
+    (spec.query_field) = {op: QUERY_OP_RANGE}
+  ];
+}
+
+// ============================================================================
+// Service
+// ============================================================================
+
+// Messaging is user-facing: it accepts user tokens minted from a browser login.
+//
+// It is the ONLY way a user gets a message onto the bus. EventBus takes no
+// client connections — same posture as stratum — so there is no direct-publish
+// path to fall back to.
+service Messaging {
+  option (spec.service_c2s) = {auth_entitled_users: true};
+
+  // SendMessage submits one message and fans it out to its recipients.
+  //
+  // Send, not Submit: the RPC verb registry is CLOSED
+  // (tacplus/pkg/internal/common/verbs/registry.json) and Submit is not in it,
+  // with no synonym mapping. Send is the registered verb for point-to-point
+  // delivery, and its boundary note — "NOT Publish; one intended recipient or
+  // channel endpoint" — is exactly right here: the recipients are named
+  // parties, and the fan-out across them is the N point-to-point deliveries
+  // this RPC produces. Publish would name the OTHER axis, the topic one, which
+  // is EventBus's and not this RPC's. The decision doc's "(e.g. `Submit`)" was
+  // an illustration, not a name.
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse) {
+    // RPC_PRINCIPAL_USER, declared explicitly rather than left to the c2s
+    // default: this RPC existing at all is the SUPERSEDED ruling's whole
+    // content — a user calls messaging, messaging calls eventbus — so the
+    // principal it accepts is the load-bearing part of the declaration.
+    option (spec.rpc) = {principal: RPC_PRINCIPAL_USER};
+  }
+}
+
+message SendMessageRequest {
+  // sender is (spec.principal): the generated wrapper resolves the
+  // authenticated caller's subject and stamps it when the field is empty,
+  // accepts it when it matches, and refuses with INVALID_ARGUMENT when it
+  // differs. A caller therefore cannot send AS someone else, and the handler
+  // does not check — there is nothing left to check.
+  string sender = 1 [
+    (spec.principal) = true,
+    (spec.assert_max_size) = 256
+  ];
+
+  // recipients is who the message is for. Every entry becomes its own delivery
+  // and its own publish.
+  //
+  // Bounded at 256 here and at Config.max_recipients (default 64) at runtime;
+  // this is the hard edge and that is the tunable one, which is why the config
+  // field may not exceed this number.
+  repeated string recipients = 2 [
+    (spec.assert_required) = true,
+    (spec.assert_max_size) = 256
+  ];
+
+  string subject = 3 [(spec.assert_max_size) = 512];
+
+  string text = 4 [(spec.assert_max_size) = 16384];
+
+  // ticket_id optionally associates this message with a ticket. See
+  // Message.ticket_id — a field, never parsed out of `text`.
+  string ticket_id = 5 [(spec.assert_max_size) = 128];
+
+  // namespace is (spec.namespace): the ingest twin of Message.namespace's
+  // (spec.store_namespace), and the WRITE half of the namespace paired control.
+  // The generated wrapper resolves the caller's verified namespace claim and
+  //   - stamps it when this field is empty,
+  //   - accepts it when it matches,
+  //   - REFUSES with INVALID_ARGUMENT when it differs.
+  // An unauthenticated caller on a namespace-bearing RPC is UNAUTHENTICATED.
+  //
+  // So a caller cannot address a send into another tenant, and the refusal
+  // happens before the handler runs. That is the write-side behaviour; the
+  // read-side backstop crashes instead, and the difference is deliberate — see
+  // Message.namespace.
+  string namespace = 6 [
+    (spec.namespace) = true,
+    (spec.assert_max_size) = 256
+  ];
+}
+
+message SendMessageResponse {
+  // message_id groups the deliveries this call produced.
+  string message_id = 1 [(spec.assert_max_size) = 128];
+
+  // delivery_ids is one id per recipient, in the order the recipients were
+  // given, and its LENGTH is the fan-out count. Returning them rather than just
+  // the message_id is what lets a caller (or a test) assert that N recipients
+  // produced N separately-keyed deliveries without reading the topic.
+  repeated string delivery_ids = 2 [(spec.assert_max_size) = 256];
+}
