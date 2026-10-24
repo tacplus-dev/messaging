@@ -6,6 +6,9 @@ output-dir: target/generated-sources
 src: proto
 # topics declared here publish through the eventbus broker.
 depends:
+  # records here declare residency; the record query plane is the query trait
+  # hosted by stratum.
+  - stratum
   - eventbus
 header: |
   Copyright (c) 2026 Jody Scott
