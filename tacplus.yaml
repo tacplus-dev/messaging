@@ -4,6 +4,9 @@ language: rust
 pkg: com.gitlab.seabeam.controlplane.schematic.services.messaging
 output-dir: target/generated-sources
 src: proto
+# topics declared here publish through the eventbus broker.
+depends:
+  - eventbus
 header: |
   Copyright (c) 2026 Jody Scott
   SPDX-License-Identifier: Apache-2.0
