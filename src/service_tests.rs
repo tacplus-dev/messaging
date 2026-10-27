@@ -641,3 +641,54 @@ async fn delivery_ids_are_derived_and_therefore_stable() {
     assert_eq!(published[0].delivery_id, format!("{mid}/user:alice"));
     assert_eq!(published[1].delivery_id, format!("{mid}/user:bob"));
 }
+
+// ---------------------------------------------------------------------------
+// Who may tail the topic
+// ---------------------------------------------------------------------------
+
+/// Every rpc in the generated registry whose gRPC path is `grpc_path`.
+fn registry_rpcs<'a>(
+    node: &'a serde_json::Value,
+    grpc_path: &str,
+    out: &mut Vec<&'a serde_json::Value>,
+) {
+    match node {
+        serde_json::Value::Object(map) => {
+            if map.get("grpc_path").and_then(|p| p.as_str()) == Some(grpc_path) {
+                out.push(node);
+            }
+            map.values().for_each(|v| registry_rpcs(v, grpc_path, out));
+        }
+        serde_json::Value::Array(items) => {
+            items.iter().for_each(|v| registry_rpcs(v, grpc_path, out))
+        }
+        _ => {}
+    }
+}
+
+/// The topic carries private messages, so who may subscribe to it is an
+/// authorization decision taken in the proto (`s2s_subscribe`), and the service
+/// that hosts the topic enforces it from the registry tacplus generates. Pinned
+/// here so the list changes only on purpose: stratum (the record store) and
+/// mailbox (the agent consumer), and no service that is not tacplus-dev's.
+#[test]
+fn only_stratum_and_mailbox_may_subscribe_to_the_message_topic() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/target/generated-sources/model/registry.json"
+    );
+    let registry: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("generated registry.json"))
+            .expect("registry.json parses");
+
+    let mut found = Vec::new();
+    registry_rpcs(
+        &registry,
+        "/messaging.MessageBusStateService/SubscribeToStream",
+        &mut found,
+    );
+    assert!(!found.is_empty(), "the topic's SubscribeToStream is in the registry");
+    for rpc in found {
+        assert_eq!(rpc["auth_services"], serde_json::json!(["stratum", "mailbox"]));
+    }
+}

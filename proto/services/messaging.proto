@@ -21,8 +21,8 @@
 // AND THE SERVICE DOES REAL WORK, for one specific reason. There are two
 // independent fan-out axes and only one of them is free:
 //
-//   - Fan-out across service TYPES (scotty's consumer group vs. the future
-//     mailbox service's) is native to EventBus's consumer-group model. Free.
+//   - Fan-out across service TYPES (stratum's consumer group vs. mailbox's)
+//     is native to EventBus's consumer-group model. Free.
 //     Nothing in this file arranges it; see the `Message` record below.
 //   - Fan-out across named RECIPIENTS within one message is NOT free. One
 //     publish is one record consumed once per consumer group; EventBus cannot
@@ -33,10 +33,8 @@
 //     and the record key's basis) and the full `recipients` list (the To: line,
 //     identical across all N).
 //
-// Modelled on scotty/proto/services/scotty.proto and
-// schematic/testapp/proto/services/tasks.proto. Where an annotation here looks
-// like one there, it is because it IS that one — see
-// platform/services/vanilla/FAMILY.md for what each generates.
+// Modelled on the fleet's other service protos. Where an annotation here looks
+// like one there, it is because it IS that one.
 
 syntax = "proto3";
 
@@ -94,8 +92,8 @@ message Config {
 // measured twice, when one is a machine ACK and the other is a claim about a
 // person. Distinct types force a consumer to decide which it is asserting.
 
-// AgentReceivedReceipt is the delivery ACK — the agent (scotty, the mailbox
-// service) took the record off the topic and processed it. Written by the
+// AgentReceivedReceipt is the delivery ACK — the agent (the mailbox service,
+// say) took the record off the topic and processed it. Written by the
 // consumer, never by the sender or by this service.
 //
 // It is the ACK, not a copy of it: there is one event here, not a delivery ACK
@@ -171,30 +169,23 @@ message Message {
     // stratum is here because it is the record store and every record topic's
     // ingest path runs through it.
     //
-    // scottyagent is here because it is Phase 1 item 7's consumer and it is a
+    // mailbox is here because it is this topic's agent consumer and it is a
     // SEPARATE CONSUMER GROUP: each named service subscribes as its own group,
     // each group gets its own full copy of every record, and within a group
     // competing-consumer semantics already guarantee exactly one instance
     // handles each record. That is the "fan-out across service types" axis, and
-    // it is free — it needs no duplication step here.
-    //
-    // mailbox is Phase 1 item 8's consumer, and it arrived exactly as this
-    // comment predicted: as a THIRD consumer group, with nothing about this
-    // message's shape changed — no field added, no key changed, no publish
-    // count changed, and neither stratum's nor scottyagent's group disturbed,
-    // because consumer groups are broadcast to independently. Its name in this
-    // list was the one edit its arrival needed, and adding it was an
+    // it is free — it needs no duplication step here. A further consumer arrives
+    // the same way, with nothing about this message's shape changed — no field
+    // added, no key changed, no publish count changed, and no existing group
+    // disturbed, because consumer groups are broadcast to independently. Its
+    // name in this list is the one edit its arrival needs, and adding it is an
     // authorization decision (who may tail private messages) taken here rather
     // than granted by the new service to itself.
     //
-    // NAME CORRECTION (Phase 1 item 7, 2026-09-01): this list said "scotty"
-    // when it was written, naming item 7's consumer before item 7 existed. The
-    // agent service that consumes this topic is `scottyagent`; `scotty` is the
-    // TICKETING service (the app service, registry id 70) and does not tail
-    // messages. Service names are global across every merged proto repo, so the
-    // agent could not take the name `scotty` and the authorization list has to
-    // name the service that actually subscribes.
-    s2s_subscribe: {auth_services: ["stratum", "scottyagent", "mailbox"]}
+    // 2026-10-27 (#3): the agent service of the upstream this was copied from
+    // is not a tacplus-dev service, so its grant is gone; nothing here may tail
+    // these messages but stratum and mailbox.
+    s2s_subscribe: {auth_services: ["stratum", "mailbox"]}
 
     // LIFECYCLE — ONE CLOCK, per
     // looper/schematic/decisions/stratum-record-lifecycle-2026-09-20.md,
@@ -209,7 +200,7 @@ message Message {
     // who actually READS these rows, which is narrower than the subscriber list
     // above suggests:
     //
-    //   - The topic consumers do NOT. stratum, scottyagent and mailbox in
+    //   - The topic consumers do NOT. stratum and mailbox in
     //     s2s_subscribe tail the STREAM; a subscriber never touches the stored
     //     row, so no volume of delivery traffic restarts this clock. Nor do
     //     mailbox's own ListHeldMail reads: those read mailbox.MailboxEntry
@@ -365,10 +356,10 @@ message Message {
   // spiffe_actor is the ORIGIN signal: the delegate that made the call, stamped
   // by EventBus from the publishing token's `act` claim at publish time.
   //
-  //   "a message is marked as originating from the user directly or from the
-  //    user's Scotty acting on their behalf... A message sent by
-  //    Scotty-for-Dennis carries `act` populated; one Dennis sends directly
-  //    doesn't." — decisions/messaging-vs-ticketing-2026-08-31.md
+  //   A message is marked as originating from the user directly or from the
+  //   user's agent acting on their behalf: one an agent sends for a user
+  //   carries `act` populated; one the user sends directly doesn't.
+  //   (The messaging-vs-ticketing decision, 2026-08-31.)
   //
   // The service does not set it and must not: like spiffe_id above, a value
   // written here would be a claim about identity that nothing verified.
@@ -379,7 +370,7 @@ message Message {
   // user's own delegated token. Under the corrected model the publish is s2s
   // from messaging, so the token EventBus stamps from is messaging's own
   // service token and carries no `act` claim at all — this field will be empty
-  // in the ordinary case, including for a genuine Scotty-for-Dennis send. The
+  // in the ordinary case, including for a genuine agent-for-user send. The
   // annotation is declared anyway, and correctly: the seam is the right one and
   // the field is where the value belongs the moment the delegated-publish path
   // exists. Closing it needs an s2s publish that carries the caller's exchanged

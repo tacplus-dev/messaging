@@ -16,7 +16,7 @@ async fn main() {
     // only fail. install_bootstrap redacts from the first line and leaves the
     // layer swappable so the typed logger config still applies later.
     //
-    // It matters here for the same reason it matters in scotty, one layer down:
+    // It matters here more than in most services:
     // every row this service handles is one person's text addressed to another
     // person. An unredacted log line is the one place that leaves the
     // entitlement model behind — which is why nothing in service.rs logs a

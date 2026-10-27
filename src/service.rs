@@ -19,8 +19,7 @@
 //!      independently-ACKable deliveries. This service does that split, and it
 //!      is the real work on this path.
 //!
-//! The OTHER fan-out axis — scotty's consumer group vs. the future mailbox
-//! service's — is free and appears nowhere in this file. It is arranged entirely
+//! The OTHER fan-out axis — stratum's consumer group vs. mailbox's — is free and appears nowhere in this file. It is arranged entirely
 //! by `s2s_subscribe` on the record declaration, because consumer groups
 //! broadcast independently. Adding a consumer is a proto edit, never a change
 //! here.
@@ -213,7 +212,7 @@ impl MessagingHandler for MessagingService {
         //
         // Not one publish with a repeated recipient list — that is the shape
         // EventBus's model would have made cheap and the decision doc rules out:
-        // a single record is consumed once per consumer group, so scotty would
+        // a single record is consumed once per consumer group, so a consumer would
         // get one record for three people and would have to fan it out itself,
         // with no per-recipient offset to ACK against and nothing to redeliver
         // if it crashed after handling two of the three.
@@ -268,8 +267,8 @@ impl MessagingHandler for MessagingService {
 
             if let Err(e) = (self.publish)(message) {
                 // A FAILED PUBLISH IS A FAILED SEND, and it is reported rather
-                // than swallowed. This is where messaging differs from scotty's
-                // artifact publish, which is fire-and-forget because the state
+                // than swallowed. This is where messaging differs from an
+                // artifact publish, which can be fire-and-forget when the state
                 // write it accompanies already succeeded: here the publish IS the
                 // send, so a dropped one is a message that silently never
                 // existed.

@@ -32,3 +32,8 @@ uuid = { version = "1", features = ["v4"] }
 token = { path = "target/generated-sources/model/chassis/token" }
 key = { path = "target/generated-sources/model/chassis/key" }
 am = { path = "target/generated-sources/model/chassis/am" }
+
+# Reads the generated registry.json, which is where the topic's subscriber
+# list (s2s_subscribe) reaches the service that enforces it. Same version as
+# the generated crates use, so it is the same crate.
+serde_json = "1"

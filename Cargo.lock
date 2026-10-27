@@ -1499,6 +1499,7 @@ dependencies = [
  "key",
  "logger",
  "messaging-model",
+ "serde_json",
  "servicemanager",
  "token",
  "tokio",

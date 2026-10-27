@@ -2,8 +2,8 @@ kind: service
 language: rust
 # compiler floor: the looper runs the latest 2.4.x compiler image (tacplus#161).
 tacplus: "2.4"
-# pkg kept as copied so the hand-written code keeps compiling; moves with the packages later.
-pkg: com.gitlab.seabeam.controlplane.schematic.services.messaging
+# Rust takes only pkg's last segment: the crate stays messaging-model.
+pkg: com.github.tacplusdev.messaging
 output-dir: target/generated-sources
 src: proto
 # topics declared here publish through the eventbus broker.

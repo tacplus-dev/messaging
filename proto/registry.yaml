@@ -4,5 +4,5 @@ registries:
 services:
     - name: messaging
       id: 53
-      contract: https://gitlab.com/seabeam/schematic/platform/proto.git
-      visibility: private
+      contract: https://github.com/tacplus-dev/messaging.git
+      visibility: public
