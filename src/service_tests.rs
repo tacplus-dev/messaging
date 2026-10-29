@@ -95,6 +95,7 @@ impl Authorizer for TokenAuthorizer {
 
     async fn check_at_or_below(
         &self,
+        _full_method: &str,
         authorization: Option<&str>,
         _target_namespace: &str,
     ) -> Result<HashMap<String, String>, tonic::Status> {
@@ -107,6 +108,7 @@ impl Authorizer for TokenAuthorizer {
     // differ only in the checks a REAL authorizer layers on top of that.
     async fn authenticate(
         &self,
+        _full_method: &str,
         authorization: Option<&str>,
     ) -> Result<HashMap<String, String>, tonic::Status> {
         Self::identity(authorization)

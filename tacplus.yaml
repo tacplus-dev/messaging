@@ -1,7 +1,7 @@
 kind: service
 language: rust
-# compiler floor: the looper runs the latest 2.4.x compiler image (tacplus#161).
-tacplus: "2.4"
+# compiler floor: the looper runs the latest 2.5.x compiler image (tacplus#161).
+tacplus: "2.5"
 # Rust takes only pkg's last segment: the crate stays messaging-model.
 pkg: com.github.tacplusdev.messaging
 output-dir: target/generated-sources
