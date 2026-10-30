@@ -46,6 +46,8 @@ import "sys/spec.proto";
 // every proto repo merged into a build and the merge hard-errors on collision.
 option (spec.service) = {name: "messaging"};
 
+option (spec.grpc_s2s_client) = {service: "query.RecordMap"};
+
 // ============================================================================
 // Config
 // ============================================================================
@@ -158,6 +160,7 @@ message Message {
     // below and messaging publishes; no client and no other service holds the
     // producer side.
     s2s: {auth_services: ["messaging"]}
+    s2s_write: {auth_services: ["messaging"]}
 
     // CONSUMER surface, and the field this whole task's topic-shape requirement
     // lands on. Naming it is not optional: without s2s_subscribe the
