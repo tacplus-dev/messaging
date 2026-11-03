@@ -391,6 +391,56 @@ async fn max_recipients_bounds_the_fan_out() {
 }
 
 // ---------------------------------------------------------------------------
+// Trace propagation (looper#51; tacplus docs/USER.md, Distributed Tracing)
+// ---------------------------------------------------------------------------
+
+/// Every publish is a call the SendMessage request causes, so each carries the
+/// inbound `trace_id`. The wrapper only reads it for its own trace events; it
+/// never copies it onto an outgoing call, so the handler must.
+#[tokio::test]
+async fn every_publish_carries_the_inbound_trace_id() {
+    let h = Harness::start().await;
+    h.wrapper
+        .send_message(Harness::signed(
+            SendMessageRequest {
+                trace_id: "trace-11".to_string(),
+                ..send_to(&["user:alice", "user:bob", "user:carol"])
+            },
+            "user:dennis",
+            TENANT,
+        ))
+        .await
+        .expect("send");
+
+    let published = h.published();
+    assert_eq!(published.len(), 3);
+    for m in &published {
+        assert_eq!(m.trace_id, "trace-11", "delivery to {} dropped the trace_id", m.recipient);
+    }
+}
+
+/// The paired control: a send with no `trace_id` publishes none, rather than
+/// inventing one.
+#[tokio::test]
+async fn untraced_send_publishes_no_trace_id() {
+    let h = Harness::start().await;
+    h.wrapper
+        .send_message(Harness::signed(
+            send_to(&["user:alice", "user:bob"]),
+            "user:dennis",
+            TENANT,
+        ))
+        .await
+        .expect("send");
+
+    let published = h.published();
+    assert_eq!(published.len(), 2);
+    for m in &published {
+        assert_eq!(m.trace_id, "");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The namespace paired control — WRITE side
 // ---------------------------------------------------------------------------
 

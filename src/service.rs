@@ -243,6 +243,10 @@ impl MessagingHandler for MessagingService {
                 spiffe_id: String::new(),
                 spiffe_actor: String::new(),
                 request_id: request_id.clone(),
+                // Each publish is caused by this request, so it carries the
+                // inbound trace_id (looper#51). The wrapper only reads it for
+                // its own trace events; propagating it is ours. Empty stays empty.
+                trace_id: req.trace_id.clone(),
                 // Both receipts are written by CONSUMERS after delivery, never by
                 // the sender and never here. Unset is the correct state of a
                 // message that has just been sent.
