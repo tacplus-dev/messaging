@@ -1,9 +1,9 @@
 # State: messaging
 
-Overwritten to stay current (loopers and agents). Last updated: 2026-11-03 by the looper (#11).
+Overwritten to stay current (loopers and agents). Last updated: 2026-11-07 by the looper (#12).
 
-- **Version / line:** unreleased (no vX.Y.Z tag); tacplus floor 2.5
-- **Works:** `SendMessage` fan-out onto `messaging.MessageBus.stream`, each delivery carrying the inbound `trace_id` (#11); `just gates` passes on the latest 2.5.x compiler (2.5.8, aws-lc-rs chassis on the ed25519-dalek 3 / der 0.8 / sha2 0.11 RustCrypto line; 20 tests); `cargo audit` reports no vulnerabilities (#10, #9, #5)
-- **Released / deployed:** not released
+- **Version / line:** v0.1.1 (line 0.1); tacplus floor 2.6, pinned to 2.6.1 and its build image by digest in `tacplus.lock` (#12)
+- **Works:** `SendMessage` fan-out onto `messaging.MessageBus.stream`, each delivery carrying the inbound `trace_id` (#11); `just gates` passes on tacplus 2.6.1 (#12; the aws-lc-rs chassis on the ed25519-dalek 3 / der 0.8 / sha2 0.11 RustCrypto line; 20 tests); `cargo audit` reports no vulnerabilities (#10, #9, #5)
+- **Released / deployed:** source tags v0.1.0 and v0.1.1 on main; binaries, images and the GitHub release come from the build pipeline (tacplus-dev/looper#17)
 - **Known gaps:** records still reach Stratum through the event bus, which the new Stratum no longer ingests (#7)
 - **Blocked on:** #7 waits on tacplus-dev/tacplus#207

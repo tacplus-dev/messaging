@@ -1,7 +1,8 @@
 kind: service
 language: rust
-# compiler floor: the looper runs the latest 2.5.x compiler image (tacplus#161).
-tacplus: "2.5"
+# compiler floor: every build runs the tacplus release and build:2.6 image
+# that tacplus.lock pins by digest (`tacplus pin` moves it, in a commit).
+tacplus: "2.6"
 # Rust takes only pkg's last segment: the crate stays messaging-model.
 pkg: com.github.tacplusdev.messaging
 output-dir: target/generated-sources
