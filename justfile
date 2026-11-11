@@ -18,6 +18,10 @@ gates:
   set -euo pipefail
   tracked="$(git ls-files target)"
   test -z "$tracked" || { echo "gates: generated files are tracked:" >&2; echo "$tracked" >&2; exit 1; }
+  # The release image runs unprivileged, as the fixed UID/GID a pod's
+  # securityContext names (#14): the Dockerfile's last USER is 65532:65532.
+  user="$(grep -E '^USER[[:space:]]' Dockerfile | tail -n 1 | awk '{print $2}')"
+  test "$user" = "65532:65532" || { echo "gates: Dockerfile's last USER is '${user}', not 65532:65532" >&2; exit 1; }
   before="$(git status --porcelain)"
   {{TACPLUS}} build --tag latest
   if [[ "$(git status --porcelain)" != "$before" ]]; then
