@@ -1,0 +1,250 @@
+= init
+> Bash git status --short && git diff && git log --oneline -3 && gh issue view 16 --repo tacplus-dev/messaging --comments | tail -30
+<  M Cargo.lock  M STATE.md diff --git a/Cargo.lock b/Cargo.lock index 1f4f03b..b1346f2 100644 --- a/Cargo.lock +++ b/Cargo.lock @@ -2189,9 +2189,9 @@ dependencies = [    [[package]]  name = "rustix" -version = "1.1.4" +version = "1.1.6"  source = "registry+https://github.com/rust-lang/crates.io-index...
+= thinking_tokens
+= thinking_tokens
+> Bash for p in 3054213633 3053714549; do curl -s https://gitlab.com/api/v4/projects/tacplus-dev%2Fbuild/pipelines/$p | head -c 600; echo; done
+< {"message":"404 Project Not Found"} {"message":"404 Project Not Found"}
+> Bash git add Cargo.lock STATE.md && git commit -q -F - <<'EOF' Relock rustix to 1.1.6 for RUSTSEC-2026-0486 (#16)  rustix 1.1.4, reached through prost-build's tempfile, marks bytes of a zero-length xattr buffer as initialized that were never written: undefined behaviour from safe code (RUSTSEC-2026-0486,...
+< 4dedbe0 Relock rustix to 1.1.6 for RUSTSEC-2026-0486 (#16) 689
+= thinking_tokens
+= thinking_tokens
+> ToolSearch {"query":"select:Monitor","max_results":1}
+< 
+> Bash cat /tmp/build16.log
+< [2026-11-11T15:19:23Z] checkpoint of #16 (a build) pushed to looper/messaging-16:  4 files changed, 224 insertions(+), 6 deletions(-) [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml)
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+> Bash until ! kill -0 689 2>/dev/null; do sleep 30; done; tail -15 /tmp/build16.log
+= background_tasks_changed
+= task_started
+< Command running in background with ID: bj9hjxb2k. Output is being written to: /builds/looper/messaging/homes/looper-16/tmp/claude-61000/-builds-looper-messaging-issues-16/36198961-f924-40fe-8be1-1dd55bca002a/tasks/bj9hjxb2k.output. You will be notified when it completes. To check interim output, use...
+= thinking_tokens
+= thinking_tokens
+> Bash git fetch -q origin && git diff --stat origin/main HEAD && git diff --stat origin/looper/messaging-16 HEAD
+<  Cargo.lock | 4 ++--  STATE.md   | 8 ++++----  2 files changed, 6 insertions(+), 6 deletions(-)  .looper/claude.log |   9 ---  .looper/prompt.md  | 209 -----------------------------------------------------  2 files changed, 218 deletions(-)
+The commit itself changes only `Cargo.lock` and `STATE.md`. The extra files in the checkpoint are the looper's own run files under `.looper/`. Waiting for the build's verdict.
+> Bash until ! kill -0 689 2>/dev/null; do sleep 30; done; tail -15 /tmp/build16.log
+= task_started
+= background_tasks_changed
+= task_updated
+< Command did not complete within its 600s timeout and was moved to the background (ID: beq38pbri). Output is being written to: /builds/looper/messaging/homes/looper-16/tmp/claude-61000/-builds-looper-messaging-issues-16/36198961-f924-40fe-8be1-1dd55bca002a/tasks/beq38pbri.output. You will be notified...
+= thinking_tokens
+= thinking_tokens
+> Bash for i in $(seq 1 19); do kill -0 689 2>/dev/null || break; sleep 30; done; tail -5 /tmp/build16.log; kill -0 689 2>/dev/null && echo RUNNING
+= task_started
+= task_notification
+< [2026-11-11T15:19:23Z] checkpoint of #16 (a build) pushed to looper/messaging-16:  4 files changed, 224 insertions(+), 6 deletions(-) [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of...
+> Bash for i in $(seq 1 19); do kill -0 689 2>/dev/null || break; sleep 30; done; tail -5 /tmp/build16.log; kill -0 689 2>/dev/null && echo RUNNING
+= task_started
+= task_updated
+= task_notification
+= background_tasks_changed
+= task_notification
+< [2026-11-11T15:19:23Z] checkpoint of #16 (a build) pushed to looper/messaging-16:  4 files changed, 224 insertions(+), 6 deletions(-) [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of...
+= thinking_tokens
+= thinking_tokens
+The extra waiter I started was stopped, which is fine. The first one is still watching the build (pipeline 3054995967), which is still running.
+> Bash for i in $(seq 1 19); do kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -3 /tmp/build16.log; kill -0 689 2>/dev/null && echo RUNNING
+= task_started
+= task_notification
+< 15:58Z [2026-11-11T15:19:23Z] checkpoint of #16 (a build) pushed to looper/messaging-16:  4 files changed, 224 insertions(+), 6 deletions(-) [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/305499...
+> Bash /usr/local/bin/repo-looper --help 2>&1 | head -40; env | grep -i -E 'gitlab|token' | sed 's/=.*/=.../'
+< repo-looper: the looper of one tacplus-dev repository. It runs in the looper container, as jobs of the GitLab looper pipeline, and only while the repository has work: a job per issue, its report, and a manager per repository, which alone merges to its main (looper#70).    repo-looper --repo NAME --i...
+= thinking_tokens
+= thinking_tokens
+> Bash for i in $(seq 1 19); do kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -2 /tmp/build16.log; kill -0 689 2>/dev/null && echo RUNNING
+= task_started
+= task_notification
+< 16:07Z [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a RUNNING
+> Bash for i in $(seq 1 19); do kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -2 /tmp/build16.log; kill -0 689 2>/dev/null && echo RUNNING
+= task_started
+= task_notification
+< 16:17Z [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a RUNNING
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+> Bash /usr/local/bin/repo-looper --repo messaging --issue 16 --checkpoint "Done: 4dedbe0 (rustix 1.1.4->1.1.6, Cargo.lock version+checksum only; STATE.md v0.1.2), recommitted on main 69e444a; build pipeline 3054995967 requested 15:19Z, no verdict at 16:17Z; land queued 16:18Z. Left: manager verdict; if gr...
+< [2026-11-11T16:17:29Z] checkpoint of #16 (a step) pushed to looper/messaging-16:  4 files changed, 308 insertions(+), 6 deletions(-) 9952
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -3 /tmp/build16.log; echo ---; tail -5 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_started
+= task_notification
+< 16:27Z [2026-11-11T15:19:23Z] checkpoint of #16 (a build) pushed to looper/messaging-16:  4 files changed, 224 insertions(+), 6 deletions(-) [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/305499...
+= thinking_tokens
+= thinking_tokens
+The land is queued. Its log shows one `jq` error, which looks like the GitHub API returned an error object instead of comments. I'll check that the GitHub API is answering.
+> Bash gh api rate_limit --jq '.resources.core' ; gh api repos/tacplus-dev/messaging/issues/16/comments --jq 'length' 2>&1 | head -3
+< {"limit":5600,"remaining":5138,"reset":1794417041,"used":462} 6
+= thinking_tokens
+= thinking_tokens
+The GitHub API is answering, so that error was a one-off and the land is still waiting for its verdict. Continuing to wait on both.
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -2 /tmp/build16.log; echo ---; tail -3 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_started
+= task_notification
+< 16:36Z [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- [2026-11-11T16:17:31Z] checkpoint of #16 (land queued) pushed to looper/...
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -2 /tmp/build16.log; echo ---; tail -3 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_started
+= task_notification
+< 16:46Z [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- [2026-11-11T16:17:31Z] checkpoint of #16 (land queued) pushed to looper/...
+= thinking_tokens
+= thinking_tokens
+> Bash ps -o pid,ppid,etime,cmd --ppid 9952; ps -o pid,ppid,etime,cmd --ppid 689; ps -u looper-16 -o pid,ppid,etime,cmd | grep -v -E 'ps -u|grep' | tail -15
+<     PID    PPID     ELAPSED CMD   15544    9952       00:10 sleep 30     PID    PPID     ELAPSED CMD   15569     689       00:03 sleep 30     PID    PPID     ELAPSED CMD     585      12    01:27:04 timeout -k 30 13787 claude --print --verbose --output-format stream-json --model claude-opus-5-5 --per...
+= thinking_tokens
+= thinking_tokens
+Both are still polling normally. This run stops around 19:09Z.
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -2 /tmp/build16.log; echo ---; tail -2 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_started
+= task_notification
+< 16:55Z [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- [2026-11-11T16:17:33Z] queued: the manager of messaging merges looper/me...
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -2 /tmp/build16.log; echo ---; tail -2 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_started
+= task_notification
+< 17:05Z [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- [2026-11-11T16:17:33Z] queued: the manager of messaging merges looper/me...
+= thinking_tokens
+= thinking_tokens
+While waiting, I'll check whether the 3h build hangs are already tracked upstream.
+> Bash for r in looper build; do echo "== $r"; gh search issues --repo tacplus-dev/$r "no verdict" --state open --json number,title --jq '.[]|"\(.number) \(.title)"' 2>&1 | head; done
+< == looper 113 Triggered tacplus-dev/build pipelines never report: no commit status, not even pending, and --build waits 3h for nothing (website 325305c, launcher 88cfeae) 130 A build nobody waits for any more does not run its gates 114 Manager discards a green verdict when main moved only by plannin...
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -2 /tmp/build16.log; echo ---; tail -2 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_started
+= task_notification
+< 17:14Z [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- [2026-11-11T16:17:33Z] queued: the manager of messaging merges looper/me...
+> Bash gh issue view 113 --repo tacplus-dev/looper --comments | tail -25
+< The looper of looper starts this issue with its limit 4h capped at 4h by this job (https://gitlab.com/tacplus-dev/looper/-/jobs/17931029138), which ends sooner: the run stops by itself before then, its work checkpointed, and the next run resumes it. -- author:	tacplus-looper association:	none edited...
+> Bash gh issue view 18 --repo tacplus-dev/cluster --json state,title,updatedAt --jq '"\(.state) \(.updatedAt) \(.title)"'; gh issue view 18 --repo tacplus-dev/cluster --comments | tail -12
+< OPEN 2026-11-10T10:40:27Z Hub: register and apply the in-cluster runners and cluster's own pipeline (README, What the hub does 1–7) association:	none edited:	false status:	none -- The manager merged [`looper/cluster-18`](https://github.com/tacplus-dev/cluster/tree/looper/cluster-18) on main: 8deb773...
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -1 /tmp/build16.log; echo ---; tail -1 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_started
+= task_updated
+= task_notification
+= background_tasks_changed
+= task_notification
+< 17:24Z the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- jq: error (at <stdin>:1): object ({"message":...) and string ("<!-- loope...) cannot have their containment checked BUILD RUNNING LAND RUNNING
+= thinking_tokens
+= thinking_tokens
+The background waiter hit its time limit and was stopped. I'm polling in the foreground instead, so nothing is lost.
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -1 /tmp/build16.log; echo ---; tail -1 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -1 /tmp/build16.log; echo ---; tail -1 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_started
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -1 /tmp/build16.log; echo ---; tail -1 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -1 /tmp/build16.log; echo ---; tail -1 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -1 /tmp/build16.log; echo ---; tail -1 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_notification
+< 17:34Z the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- jq: error (at <stdin>:1): object ({"message":...) and string ("<!-- loope...) cannot have their containment checked BUILD RUNNING LAND RUNNING
+= task_started
+= task_notification
+< 17:43Z the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- jq: error (at <stdin>:1): object ({"message":...) and string ("<!-- loope...) cannot have their containment checked BUILD RUNNING LAND RUNNING
+= task_started
+= task_notification
+< 17:53Z the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- jq: error (at <stdin>:1): object ({"message":...) and string ("<!-- loope...) cannot have their containment checked BUILD RUNNING LAND RUNNING
+= task_started
+= task_notification
+< 18:02Z the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- jq: error (at <stdin>:1): object ({"message":...) and string ("<!-- loope...) cannot have their containment checked BUILD RUNNING LAND RUNNING
+= task_started
+= task_notification
+< 18:12Z the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a --- jq: error (at <stdin>:1): object ({"message":...) and string ("<!-- loope...) cannot have their containment checked BUILD RUNNING LAND RUNNING
+> Bash for i in $(seq 1 19); do kill -0 9952 2>/dev/null || break; kill -0 689 2>/dev/null || break; sleep 30; done; date -u +%H:%MZ; tail -3 /tmp/build16.log; echo ---; tail -1 /tmp/land16.log; kill -0 689 2>/dev/null && echo BUILD RUNNING; kill -0 9952 2>/dev/null && echo LAND RUNNING
+= task_started
+= task_notification
+< 18:19Z [2026-11-11T15:19:23Z] build requested: messaging 4dedbe0, the gates full (no gates.yaml) the build job https://gitlab.com/tacplus-dev/build/-/pipelines/3054995967 of messaging 4dedbe0, the gates full on base 69e444a no verdict within 3h --- jq: error (at <stdin>:1): object ({"message":...) a...
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+= thinking_tokens
+> Bash /usr/local/bin/repo-looper --repo messaging --issue 16 --checkpoint "Done: 4dedbe0 (rustix 1.1.4->1.1.6, Cargo.lock version+checksum only; STATE.md v0.1.2) on main 69e444a; land queued 16:17Z, still queued at 18:20Z; build pipeline 3054995967 ended 'no verdict within 3h' (no runner: tacplus-dev/clus...
+= task_started
+= task_notification
+< [2026-11-11T18:19:45Z] checkpoint of #16 (a step) pushed to looper/messaging-16:  5 files changed, 448 insertions(+), 6 deletions(-) https://github.com/tacplus-dev/messaging/issues/16#issuecomment-6803813742 Blocked-by: tacplus-dev/cluster#18
+#16 isn't done: the fix is committed and queued to land, but the gates haven't run on it yet. This run ends with the issue marked `Blocked-by: tacplus-dev/cluster#18`.
+
+- **Change:** commit 4dedbe0 on `looper/messaging-16`, on top of main `69e444a`. In `Cargo.lock`, rustix goes from 1.1.4 to 1.1.6 (only its version and checksum change), and `STATE.md` now says v0.1.2. The earlier run's osv-scanner check still applies: it no longer reports RUSTSEC-2026-0486.
+- **Build:** the full-gates build (pipeline 3054995967) ended with "no verdict within 3h". That's the third build of this change where no gate ran: the two before it also timed out, and the first land attempt got a GitLab 422.
+- **Cause:** this isn't a test failure. Build jobs aren't getting a runner. That's tracked in tacplus-dev/looper#113, which waits on tacplus-dev/cluster#18 (the in-cluster runners, which need Jody's GitLab/GCP steps). The 422 is tracked in tacplus-dev/looper#127.
+- **Land:** queued again at 16:17Z with the full gate set, still without a verdict. The manager lands it after this run if a build gets a runner.
+- **Not done yet:** because `just gates` hasn't passed on the change, `v0.1.2` isn't tagged and #16 stays open. The next run tags `v0.1.2` at the landed commit and closes the issue once the gates pass. There are no `release/*` branches, so there's no backport.
+
+I posted this status on #16 and wrote `Blocked-by: tacplus-dev/cluster#18` to the run's outcome file. Queuing another land now would only add one more 3h build to the pool that has no runners.
+= success: #16 isn't done: the fix is committed and queued to land, but the gates haven't run on it yet. This run ends with the issue marked `Blocked-by: tacplus-dev/cluster#18`.
+
+- **Change:** commit 4dedbe0 on `looper/messaging-16`, on top of main `69e444a`. In `Cargo.lock`, rustix goes from 1.1.4 to 1.1.6 (only its version and checksum change), and `STATE.md` now says v0.1.2. The earlier run's osv-scanner check still applies: it no longer reports RUSTSEC-2026-0486.
+- **Build:** the full-gates build (pipeline 3054995967) ended with "no verdict within 3h". That's the third build of this change where no gate ran: the two before it also timed out, and the first land attempt got a GitLab 422.
+- **Cause:** this isn't a test failure. Build jobs aren't getting a runner. That's tracked in tacplus-dev/looper#113, which waits on tacplus-dev/cluster#18 (the in-cluster runners, which need Jody's GitLab/GCP steps). The 422 is tracked in tacplus-dev/looper#127.
+- **Land:** queued again at 16:17Z with the full gate set, still without a verdict. The manager lands it after this run if a build gets a runner.
+- **Not done yet:** because `just gates` hasn't passed on the change, `v0.1.2` isn't tagged and #16 stays open. The next run tags `v0.1.2` at the landed commit and closes the issue once the gates pass. There are no `release/*` branches, so there's no backport.
+
+I posted this status on #16 and wrote `Blocked-by: tacplus-dev/cluster#18` to the run's outcome file. Queuing another land now would only add one more 3h build to the pool that has no runners.
