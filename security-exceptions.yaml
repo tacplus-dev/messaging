@@ -1,0 +1,13 @@
+# The known findings this repository accepts, each until its expiry, in the form looper-scan reads
+# (tacplus-dev/looper#49: exactly id, reason, decided_by and expires, YYYY-MM-DD; one id per entry). The build's
+# security job enforces it: an expired entry fails the pipeline, and so does the finding it accepted.
+#
+# DS-0026 (trivy, LOW, "No HEALTHCHECK defined") on the release Dockerfile: the distroless image has no shell, so a
+# HEALTHCHECK could only run messaging itself; health is reported through the chassis (check_health in
+# src/service.rs, through the healthreporter) to Kubernetes probes, and Kubernetes ignores HEALTHCHECK. On expiry
+# the gate goes red and the decision is revisited.
+exceptions:
+  - id: DS-0026
+    reason: "No HEALTHCHECK in the distroless release image (no shell): health is served through the chassis healthreporter to Kubernetes probes, which ignore HEALTHCHECK."
+    decided_by: "jodydadescott (hub, 2026-11-17, on tacplus-dev/messaging#20)"
+    expires: 2027-05-17
