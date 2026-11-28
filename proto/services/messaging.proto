@@ -46,6 +46,13 @@ import "sys/spec.proto";
 // every proto repo merged into a build and the merge hard-errors on collision.
 option (spec.service) = {name: "messaging"};
 
+// Stratum's record plane, for its generated WRITE surface (tacplus 2.5,
+// tacplus#163): every delivery is written through it (`Apply` of
+// `InsertIfAbsentMessage`), because stratum no longer ingests records from the
+// bus (`(spec.record_store) = {no_bus_ingest: true}`, tacplus-dev/stratum#2).
+// The grant half is Message's `s2s_write` below.
+option (spec.grpc_s2s_client) = {service: "query.RecordMap"};
+
 // ============================================================================
 // Config
 // ============================================================================
@@ -58,6 +65,12 @@ message Config {
   // (messaging.MessageBus.stream). It carries no method_s2s: the producer
   // surface is declared on the record itself and the generator folds it in, so
   // restating it here could only drift.
+  //
+  // Since 2026-11-28 (#7) this publish STORES nothing: stratum no longer
+  // ingests from the bus, and every delivery is written through its write
+  // surface first. What is left is the plain event mailbox subscribes to
+  // (`(spec.event_watch)` in services/mailbox.proto), published only once the
+  // store has acked the write.
   option (spec.event_publish) = {
     topic_ref: "messaging.MessageBus.stream"
   };
@@ -159,6 +172,19 @@ message Message {
     // producer side.
     s2s: {auth_services: ["messaging"]}
 
+    // STORE WRITE: messaging writes every delivery through stratum's generated
+    // write surface (`InsertIfAbsentMessage`, inside one `Apply` per
+    // submission), whose answer is final: done, or refused with the reason.
+    // This replaced the publish being the write on 2026-11-28 (#7), when
+    // stratum stopped ingesting from the bus (tacplus-dev/stratum#2).
+    s2s_write: {auth_services: ["messaging"]}
+
+    // LOCAL, the default, stated: a write is acked once the local redo has it on
+    // disk, so a sent message survives a full restart (MEMORY would not). REMOTE
+    // is not served until redo#1 step 2 and is refused with FAILED_PRECONDITION
+    // until then.
+    durability: DURABILITY_LOCAL
+
     // CONSUMER surface, and the field this whole task's topic-shape requirement
     // lands on. Naming it is not optional: without s2s_subscribe the
     // synthesized MessageBus wrapper's SubscribeTo RPC falls back to the state
@@ -166,8 +192,10 @@ message Message {
     // the OWNING PACKAGE ("messaging"), and every real subscriber is denied on
     // the topic it exists to read.
     //
-    // stratum is here because it is the record store and every record topic's
-    // ingest path runs through it.
+    // stratum is NOT here since 2026-11-28 (#7): it no longer tails record
+    // topics (tacplus-dev/stratum#2), it is written to directly. Since tacplus
+    // 2.5 this list is also the audience of the store's `WatchMessageChanges`,
+    // the record's change feed.
     //
     // mailbox is here because it is this topic's agent consumer and it is a
     // SEPARATE CONSUMER GROUP: each named service subscribes as its own group,
@@ -184,8 +212,8 @@ message Message {
     //
     // 2026-10-27 (#3): the agent service of the upstream this was copied from
     // is not a tacplus-dev service, so its grant is gone; nothing here may tail
-    // these messages but stratum and mailbox.
-    s2s_subscribe: {auth_services: ["stratum", "mailbox"]}
+    // these messages but mailbox.
+    s2s_subscribe: {auth_services: ["mailbox"]}
 
     // LIFECYCLE — ONE CLOCK, per
     // looper/schematic/decisions/stratum-record-lifecycle-2026-09-20.md,
@@ -412,11 +440,11 @@ message Message {
   // that the record nobody remembered to annotate is exactly the one that leaks.
   //
   // TWO DIFFERENT ENFORCEMENTS, and they are not the same failure:
-  //   - WRITE (this record's publish path). eventbus's PublishHandler stamps
-  //     this field from the publishing token's namespace claim and REFUSES the
-  //     publish with PERMISSION_DENIED when the token carries none. Stamp-or-
-  //     refuse, deliberately not stamp-if-empty: a row published with an empty
-  //     namespace is a row no legitimate caller can ever read.
+  //   - WRITE (stratum's write surface, since 2026-11-28, #7). Messaging sets
+  //     it to the sender's wrapper-verified namespace and routes the write to
+  //     that namespace's tenant (`target_tenant`); the tenant-owned store's
+  //     generated wrapper refuses a row outside the routed tenant, unset
+  //     included, with PERMISSION_DENIED (tacplus#207).
   //   - READ (stratum's record query plane, c2s half). The generated egress
   //     filter holds every row to the reader's own claim, and a row that fails
   //     the comparison HALTS THE JVM rather than failing the one call — the

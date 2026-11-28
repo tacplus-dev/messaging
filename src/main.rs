@@ -43,11 +43,17 @@ async fn run() -> Result<(), Box<dyn Error>> {
     // then serves the generated gRPC surface and blocks until shutdown.
     let sm = Arc::new(ServiceManager::new().await?);
 
-    // The topic is SYNTHESIZED from Message's spec.record, so its publisher
-    // factory is named after the generated wrapper (MessageBus) and its field
-    // (stream), not after anything hand-written. This is the ONLY path by which
-    // a message leaves this service, which is why it is acquired before the
-    // server starts rather than lazily on first use.
+    // Where a message is STORED: stratum's record plane, whose write surface
+    // client the ServiceManager owns because messaging.proto declares
+    // (spec.grpc_s2s_client) on query.RecordMap and Message grants this service
+    // s2s_write. Stratum no longer ingests from the bus (#7).
+    let store = Arc::new(service::RecordPlaneStore(sm.clone()));
+
+    // Where a stored message is ANNOUNCED, for mailbox. The topic is
+    // SYNTHESIZED from Message's spec.record, so its publisher factory is named
+    // after the generated wrapper (MessageBus) and its field (stream), not after
+    // anything hand-written. Acquired before the server starts rather than
+    // lazily on first use.
     //
     // Note what is NOT here: no eventbus client is constructed, no topic name is
     // typed out, no token is acquired for the "eventbus" audience. All four are
@@ -55,7 +61,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     // rewriting every one of them.
     let publish = sm.create_messaging_message_bus_stream_publisher().await;
 
-    let svc = Arc::new(service::MessagingService::new(publish));
+    let svc = Arc::new(service::MessagingService::new(store, publish));
     let handler = Arc::new(service::MessagingServiceHandler::new(svc));
 
     sm.run(handler).await

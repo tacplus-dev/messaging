@@ -19,10 +19,18 @@
 //!      independently-ACKable deliveries. This service does that split, and it
 //!      is the real work on this path.
 //!
-//! The OTHER fan-out axis — stratum's consumer group vs. mailbox's — is free and appears nowhere in this file. It is arranged entirely
-//! by `s2s_subscribe` on the record declaration, because consumer groups
-//! broadcast independently. Adding a consumer is a proto edit, never a change
-//! here.
+//! The OTHER fan-out axis — who consumes the topic — is free and appears
+//! nowhere in this file. It is arranged entirely by `s2s_subscribe` on the
+//! record declaration, because consumer groups broadcast independently. Adding
+//! a consumer is a proto edit, never a change here.
+//!
+//! HOW A DELIVERY IS STORED, since 2026-11-28 (#7): through stratum's generated
+//! write surface, not by publishing on the record's topic. Stratum no longer
+//! ingests from the bus (tacplus-dev/stratum#2), and its answer is final:
+//! done, acked at the record's durability (LOCAL), or refused with the reason.
+//! The deliveries of one submission are ONE `Apply`, so the fan-out is stored
+//! all or nothing. Only then are they published on the topic, which now
+//! stores nothing and is the event mailbox consumes.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -35,24 +43,116 @@ use messaging_model::types::services::messaging::{
     Message, SendMessageRequest, SendMessageResponse,
 };
 use messaging_model::types::sys::healthreport::healthreport::InstanceStatus;
+use messaging_model::types::vservices::query::{
+    record_op, InsertIfAbsentMessageRequest, RecordApplyRequest, RecordOp,
+};
+
+/// The writes this service makes of the record store.
+///
+/// A SEAM, the same one mailbox's `MailboxEntryStore` is: the record plane is
+/// reachable only through a live client, and its full server trait covers
+/// every record in the build. So the production implementation below is the
+/// only place the generated client is named, and the tests substitute a store
+/// of their own.
+#[async_trait::async_trait]
+pub trait MessageStore: Send + Sync {
+    /// Insert every one of `deliveries`, all or nothing, as ONE `Apply` of
+    /// `InsertIfAbsentMessage` ops routed to `tenant`, the tid of the
+    /// per-tenant Stratum that holds them (`target_tenant`, tacplus#207). The
+    /// deliveries come in the store's canonical order (by key), which an
+    /// `Apply` must be in. Answers each op's revision, or the store's refusal:
+    /// ALREADY_EXISTS when a key is present, UNAVAILABLE while its redo is
+    /// unreachable, FAILED_PRECONDITION for a durability it does not serve yet.
+    /// `trace_id` is the causing request's (field 200), carried as it came.
+    async fn insert_all(
+        &self,
+        tenant: &str,
+        deliveries: Vec<Message>,
+        trace_id: &str,
+    ) -> Result<Vec<i64>, tonic::Status>;
+}
+
+/// The tid of the tenant whose Stratum holds the rows of `namespace`: the
+/// `<tid>` of `/tenants/<tid>` or anything below it, or `None` for a namespace
+/// in no tenant (`/system`, say). The chassis's own reading of a namespace
+/// claim, so this service cannot disagree with the router about it.
+pub fn tenant_of(namespace: &str) -> Option<String> {
+    servicemanager::tenant_route::tenant_of_caller_namespace(namespace)
+}
+
+/// The production store: stratum's record plane, through the generated client.
+///
+/// Nothing here constructs a client, names an address, or acquires a token:
+/// `(spec.grpc_s2s_client)` in messaging.proto is what caused the client to be
+/// generated and wired, and `Message`'s `s2s_write` grant is what lets this
+/// service call it. The write asks for no durability, so stratum's generated
+/// wrapper holds it to the record's declared floor (LOCAL).
+pub struct RecordPlaneStore(pub Arc<messaging_model::s2sm::ServiceManager>);
+
+#[async_trait::async_trait]
+impl MessageStore for RecordPlaneStore {
+    async fn insert_all(
+        &self,
+        tenant: &str,
+        deliveries: Vec<Message>,
+        trace_id: &str,
+    ) -> Result<Vec<i64>, tonic::Status> {
+        let ops = deliveries
+            .into_iter()
+            .map(|m| RecordOp {
+                op: Some(record_op::Op::InsertIfAbsentMessage(
+                    InsertIfAbsentMessageRequest {
+                        item: Some(m),
+                        target_tenant: tenant.to_string(),
+                        trace_id: trace_id.to_string(),
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            })
+            .collect();
+        Ok(self
+            .0
+            .s2s()
+            .stratum()
+            .record_map_client()
+            .apply(RecordApplyRequest {
+                ops,
+                target_tenant: tenant.to_string(),
+                trace_id: trace_id.to_string(),
+                ..Default::default()
+            })
+            .await?
+            .into_inner()
+            .results
+            .into_iter()
+            .map(|r| r.revision)
+            .collect())
+    }
+}
 
 /// The publisher the generated ServiceManager hands over for the topic
 /// synthesized from `Message`'s `spec.record` (`messaging.MessageBus.stream`).
 ///
 /// Fire-and-forget into a bounded queue: the closure reports queue backpressure
-/// (`TrySendError::Full`) to the caller rather than dropping, which is the only
-/// reason this path can report a partial fan-out at all. See `send_message` for
-/// what it does with that.
+/// (`TrySendError::Full`) to the caller rather than dropping. The publish stores
+/// nothing (the store write before it does); it is the event mailbox consumes.
+/// See `send_message` for what a full queue answers.
 pub type MessagePublisher = Arc<
     dyn Fn(Message) -> Result<(), tokio::sync::mpsc::error::TrySendError<Message>> + Send + Sync,
 >;
 
 pub struct MessagingService {
-    /// The ONLY outbound path. Never a hand-rolled EventBus client: this closure
-    /// is generated from the record declaration and already owns the transport,
-    /// the topic name, the s2s token acquisition and the connection to the state
-    /// store. There is nothing left for hand-written code to get wrong, and
-    /// writing a second one would mean writing all four of those again.
+    /// Where a delivery is STORED: stratum's write surface. A send is done when
+    /// this answers, and refused when it refuses.
+    store: Arc<dyn MessageStore>,
+
+    /// Where a stored delivery is ANNOUNCED. Never a hand-rolled EventBus
+    /// client: this closure is generated from the record declaration and
+    /// already owns the transport, the topic name, the s2s token acquisition
+    /// and the connection to the state store. There is nothing left for
+    /// hand-written code to get wrong, and writing a second one would mean
+    /// writing all four of those again.
     publish: MessagePublisher,
 
     /// max_recipients as delivered by kernel config — the fan-out bound. Held
@@ -66,8 +166,9 @@ pub struct MessagingService {
 }
 
 impl MessagingService {
-    pub fn new(publish: MessagePublisher) -> Self {
+    pub fn new(store: Arc<dyn MessageStore>, publish: MessagePublisher) -> Self {
         Self {
+            store,
             publish,
             // Overwritten by the first `messaging_config` call before the server
             // accepts traffic; the generated SM delivers config first. The
@@ -107,8 +208,8 @@ impl MessagingService {
 ///   - It is reconstructible by anyone who knows (which message, for whom), so
 ///     an agent ACKing a delivery never has to have been told an opaque id.
 ///   - It makes a retried submission REPLAY-SAFE: the same message_id and the
-///     same recipients regenerate the same delivery ids, so the retry rewrites
-///     the same rows instead of creating a second set.
+///     same recipients regenerate the same delivery ids, so the store refuses
+///     the retry's inserts (ALREADY_EXISTS) instead of creating a second set.
 ///
 /// The separator is '/' rather than ':' because a recipient is a principal
 /// subject and those can contain ':' (a SPIFFE id does); '/' appears in them too,
@@ -199,6 +300,17 @@ impl MessagingHandler for MessagingService {
             )));
         }
 
+        // The per-tenant Stratum that holds this send: the sender's tenant, the
+        // one its rows are stamped with below. Routed by the RECORD's tenant
+        // (tacplus#207), never this service's own: messaging runs in /system
+        // and writes for every tenant. A sender in no tenant has no Stratum to
+        // hold the message, so the send is refused before anything is written.
+        let Some(tenant) = tenant_of(&namespace) else {
+            return Err(tonic::Status::failed_precondition(
+                "the sender's namespace is in no tenant; there is no store to hold the message",
+            ));
+        };
+
         // One clock and one id for the whole submission: the N deliveries were
         // ONE act, so they must not disagree about when it happened or about
         // which submission they belong to. Taken once, here, rather than per
@@ -207,10 +319,10 @@ impl MessagingHandler for MessagingService {
         let sent_at_ms = now_ms();
         let request_id = request_id(caller).to_string();
 
-        // THE FAN-OUT. One publish per recipient, each a complete Message
+        // THE FAN-OUT. One delivery per recipient, each a complete Message
         // differing only in `recipient` and the `delivery_id` derived from it.
         //
-        // Not one publish with a repeated recipient list — that is the shape
+        // Not one record with a repeated recipient list — that is the shape
         // EventBus's model would have made cheap and the decision doc rules out:
         // a single record is consumed once per consumer group, so a consumer would
         // get one record for three people and would have to fan it out itself,
@@ -220,12 +332,10 @@ impl MessagingHandler for MessagingService {
         // `recipients` (the To: line) IS carried on every delivery, identically.
         // That is not the fan-out — it is what lets each recipient see who else
         // was addressed.
-        let mut delivery_ids = Vec::with_capacity(recipients.len());
-        for recipient in &recipients {
-            let delivery_id = delivery_id(&message_id, recipient);
-
-            let message = Message {
-                delivery_id: delivery_id.clone(),
+        let deliveries: Vec<Message> = recipients
+            .iter()
+            .map(|recipient| Message {
+                delivery_id: delivery_id(&message_id, recipient),
                 message_id: message_id.clone(),
                 sender: sender.clone(),
                 recipient: recipient.clone(),
@@ -234,16 +344,18 @@ impl MessagingHandler for MessagingService {
                 text: req.text.clone(),
                 ticket_id: req.ticket_id.clone(),
                 sent_at_ms,
-                // spiffe_id and spiffe_actor are STAMPED BY EVENTBUS from the
-                // publishing token — `(spec.identity_spiffe_subject)` and
-                // `(spec.identity_spiffe_actor)` — and are deliberately left
-                // empty here. Writing a value into either would be this
-                // service asserting an identity that nothing verified, which
-                // is exactly what those annotations exist to prevent.
+                // spiffe_id and spiffe_actor are `(spec.identity_spiffe_subject)`
+                // and `(spec.identity_spiffe_actor)`: stamped from a verified
+                // token by the platform, never by this service, and
+                // deliberately left empty here. Writing a value into either
+                // would be this service asserting an identity that nothing
+                // verified, which is exactly what those annotations exist to
+                // prevent. (eventbus stamped them on publish; nothing stamps
+                // them on the write surface yet: PROPOSALS.md.)
                 spiffe_id: String::new(),
                 spiffe_actor: String::new(),
                 request_id: request_id.clone(),
-                // Each publish is caused by this request, so it carries the
+                // Each delivery is caused by this request, so it carries the
                 // inbound trace_id (looper#51). The wrapper only reads it for
                 // its own trace events; propagating it is ours. Empty stays empty.
                 trace_id: req.trace_id.clone(),
@@ -253,55 +365,71 @@ impl MessagingHandler for MessagingService {
                 agent_received: None,
                 human_viewed: None,
                 // namespace is set to the WRAPPER-VERIFIED sender's namespace,
-                // not left empty — FIXED 2026-09-16. The comment this replaced
-                // described `(spec.store_namespace)` as pure stamp-or-refuse at
-                // the broker, which was eventbus's behavior before
-                // decisions/namespace-fix-corrected-2026-09-02.md: it is now a
-                // three-way (already set on the row → accepted; empty →
-                // stamped from the PUBLISHER's own token, not the sender's).
-                // Leaving this empty meant every message landed under
-                // messaging's own service namespace instead of the sender's
-                // tenant, so the intended recipient's tenant-scoped read could
-                // never find it — messages sent, never delivered, no error.
-                // Same fix mailbox already has (mailbox/src/service.rs:396
-                // copies msg.namespace from the delivery on purpose).
+                // not left empty — FIXED 2026-09-16. Leaving it empty filed every
+                // message under messaging's own service namespace instead of the
+                // sender's tenant, so the intended recipient's tenant-scoped
+                // read could never find it — messages sent, never delivered, no
+                // error. Since #7 it is also what the write is routed by
+                // (`tenant` above), and the tenant's store refuses a row
+                // outside it.
                 namespace: namespace.clone(),
                 ..Default::default()
-            };
+            })
+            .collect();
+        let delivery_ids: Vec<String> = deliveries.iter().map(|m| m.delivery_id.clone()).collect();
 
+        // STORE, all or nothing: ONE Apply of the N inserts, so there is no
+        // partial fan-out — a refused Apply wrote none of them. Its ops must be
+        // in the store's canonical order (record type, then key), so they are
+        // sorted by key; the response keeps the recipients' order.
+        let mut ordered = deliveries.clone();
+        ordered.sort_by(|a, b| a.delivery_id.cmp(&b.delivery_id));
+        if let Err(status) = self.store.insert_all(&tenant, ordered, &req.trace_id).await {
+            tracing::error!(
+                code = ?status.code(),
+                message_id = %message_id,
+                deliveries = delivery_ids.len(),
+                "message store write refused; nothing stored"
+            );
+            return Err(match status.code() {
+                // The message_id is a fresh uuid, so a present key is a
+                // collision, not a resend: the caller's answer is to retry.
+                tonic::Code::AlreadyExists => tonic::Status::aborted(format!(
+                    "message {message_id} collided with a stored delivery; nothing was stored, retry the send"
+                )),
+                // UNAVAILABLE (the store's redo is unreachable),
+                // FAILED_PRECONDITION (a durability it does not serve yet) and
+                // the rest are the caller's answer as they are.
+                _ => status,
+            });
+        }
+
+        // ANNOUNCE, for mailbox: one publish per delivery, only once the store
+        // has acked them, so no consumer hears of a message that is not
+        // stored.
+        for (announced, message) in deliveries.into_iter().enumerate() {
             if let Err(e) = (self.publish)(message) {
-                // A FAILED PUBLISH IS A FAILED SEND, and it is reported rather
-                // than swallowed. This is where messaging differs from an
-                // artifact publish, which can be fire-and-forget when the state
-                // write it accompanies already succeeded: here the publish IS the
-                // send, so a dropped one is a message that silently never
-                // existed.
-                //
-                // The partial fan-out is named explicitly. Deliveries before this
-                // one are already on the topic and cannot be recalled, so
-                // reporting a bare failure would be a lie in the other direction.
-                // A retry is safe and is the right response: delivery_id is
-                // derived, so re-sending the same submission rewrites the same
-                // rows — but only if the caller reuses the message_id, which this
-                // API does not yet let them do. That gap is written up in
-                // workers/big8-p1-messaging-questions.md.
+                // The message IS sent: every delivery is stored and readable.
+                // What failed is telling mailbox, so it is reported rather than
+                // swallowed — a recipient whose mailbox never lists it would
+                // not know to look. A retry would store a second copy, so the
+                // answer says the first is there.
                 tracing::error!(
                     error = %e,
                     message_id = %message_id,
-                    delivered = delivery_ids.len(),
-                    of = recipients.len(),
-                    "message publish queue full; fan-out incomplete"
+                    announced,
+                    of = delivery_ids.len(),
+                    "message publish queue full; deliveries stored, announcement incomplete"
                 );
                 return Err(tonic::Status::unavailable(format!(
-                    "publish queue full after {} of {} deliveries for message {}; \
-                     the deliveries already published cannot be recalled",
+                    "message {} is stored for all {} recipients, but the publish queue was full \
+                     after announcing {} of them; do not resend it",
+                    message_id,
                     delivery_ids.len(),
-                    recipients.len(),
-                    message_id
+                    announced
                 )));
             }
             self.published.fetch_add(1, Ordering::Relaxed);
-            delivery_ids.push(delivery_id);
         }
 
         tracing::info!(
